@@ -44,10 +44,19 @@ def cancel_order(order_id: str):
     order = orders.get(order_id)
     if not order:
         raise HTTPException(status_code=404, detail="order not found")
-    requests.post(
-        f"{PAYMENT_URL}/refund", json={"order_id": order_id, "amount": order['amount']}
-    )
-    requests.post(f"{INVENTORY_URL}/release", json=order)
+    try:
+        refund_res = requests.post(
+            f"{PAYMENT_URL}/refund", json={"order_id": order_id, "amount": order['amount']}, timeout=5
+        )
+        refund_res.raise_for_status()
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="refund unavailable")
+
+    try:
+        release_res = requests.post(f"{INVENTORY_URL}/release", json=order, timeout=5)
+        release_res.raise_for_status()
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="inventory release unavailable")
     orders.pop(order_id)
     return {"status": "cancelled"}
 

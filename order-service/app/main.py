@@ -17,6 +17,11 @@ def create_order(order: OrderRequest):
     order_id = str(len(orders) + 1)
     try:
         res = requests.post(f"{INVENTORY_URL}/reserve", json=order.dict(), timeout=5)
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="inventory unavailable")
+    if res.status_code == 400:
+        raise HTTPException(status_code=400, detail="insufficient stock")
+    try:
         res.raise_for_status()
     except requests.RequestException:
         raise HTTPException(status_code=503, detail="inventory unavailable")

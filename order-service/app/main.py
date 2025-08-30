@@ -29,7 +29,11 @@ def create_order(order: OrderRequest):
         )
         res.raise_for_status()
     except requests.RequestException:
-        requests.post(f"{INVENTORY_URL}/release", json=order.dict())
+        try:
+            requests.post(f"{INVENTORY_URL}/release", json=order.dict(), timeout=5)
+        except requests.RequestException as e:
+            # Log the failure to release inventory for operational visibility
+            print(f"Failed to release inventory for order compensation: {e}")
         raise HTTPException(status_code=503, detail="payment unavailable")
 
     orders[order_id] = order.dict()

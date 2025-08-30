@@ -14,6 +14,9 @@ def charge(req: PaymentRequest):
     return {"status": "charged"}
 
 @app.post("/refund")
+def refund(req: PaymentRequest):
+    if req.order_id in payments and payments[req.order_id] == req.amount:
+        del payments[req.order_id]
         return {"status": "refunded"}
     return {"status": "failed", "reason": "order not found or amount mismatch"}
 

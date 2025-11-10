@@ -1,5 +1,5 @@
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 import requests
 
@@ -27,6 +27,7 @@ html = """
       --accent-dark: #1e3a8a;
       --danger: #ef4444;
       --success: #16a34a;
+      --warning: #f59e0b;
       font-family: "Segoe UI", "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
@@ -182,6 +183,12 @@ html = """
       border-color: rgba(248, 113, 113, 0.4);
     }
 
+    .status.status-warning {
+      background: rgba(250, 204, 21, 0.2);
+      color: var(--warning);
+      border-color: rgba(250, 204, 21, 0.5);
+    }
+
     .status.status-muted {
       background: rgba(148, 163, 184, 0.18);
       color: var(--text-muted);
@@ -283,7 +290,8 @@ html = """
       outputEl.textContent = JSON.stringify(payload, null, 2);
     }
 
-    async function loadItems(showFeedback = false) {
+    async function loadItems(options = {}) {
+      const { showFeedback = false, silent = false } = options;
       try {
         const res = await fetch('/api/items');
         if (!res.ok) {
@@ -306,10 +314,12 @@ html = """
             sel.appendChild(opt);
           }
         }
-        if (showFeedback) {
-          setStatus('Inventar erfolgreich aktualisiert.', 'success');
-        } else {
-          setStatus('Inventar geladen.', 'muted');
+        if (!silent) {
+          if (showFeedback) {
+            setStatus('Inventar erfolgreich aktualisiert.', 'success');
+          } else {
+            setStatus('Inventar geladen.', 'muted');
+          }
         }
         return items;
       } catch (error) {
@@ -334,7 +344,7 @@ html = """
         if (!res.ok) {
           throw new Error(text);
         }
-        await loadItems(true);
+        await loadItems({ showFeedback: true });
       } catch (error) {
         setStatus('Bestand konnte nicht gespeichert werden.', 'error');
         console.error(error);
@@ -355,12 +365,31 @@ html = """
         });
         const text = await res.text();
         renderOutput(text);
-        if (!res.ok) {
-          throw new Error(text);
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = text;
         }
-        setStatus('Bestellung erfolgreich erstellt.', 'success');
+        if (!res.ok) {
+          const detail = typeof data === 'object' && data !== null ? data.detail || text : text;
+          if (res.status === 400) {
+            setStatus(`Nicht genügend Bestand: ${detail}`, 'warning');
+          } else {
+            setStatus(`Bestellung fehlgeschlagen: ${detail}`, 'error');
+          }
+          return;
+        }
+        await loadItems({ silent: true });
+        if (data && typeof data === 'object') {
+          const statusText = data.status ?? 'bestätigt';
+          const summary = `Bestellung erfolgreich: #${data.order_id} — ${formData.quantity}× ${formData.item_id} für €${formData.amount.toFixed(2)} (${statusText}).`;
+          setStatus(summary, 'success');
+        } else {
+          setStatus('Bestellung erfolgreich erstellt.', 'success');
+        }
       } catch (error) {
-        setStatus('Bestellung konnte nicht erstellt werden.', 'error');
+        setStatus('Bestellung konnte nicht erstellt werden. Bitte später erneut versuchen.', 'error');
         console.error(error);
       }
     });
@@ -388,19 +417,39 @@ def index():
     return HTMLResponse(html)
 
 
+def _forward_response(resp: requests.Response) -> Response:
+    media_type = resp.headers.get("content-type")
+    if media_type and "application/json" in media_type.lower():
+        try:
+            data = resp.json()
+        except ValueError:
+            return Response(content=resp.content, status_code=resp.status_code, media_type=media_type)
+        return JSONResponse(content=data, status_code=resp.status_code)
+    return Response(content=resp.content, status_code=resp.status_code, media_type=media_type)
+
+
 @app.get("/api/items")
 def api_items():
-    resp = requests.get(f"{INVENTORY_URL}/items", timeout=5)
-    return resp.json()
+    try:
+        resp = requests.get(f"{INVENTORY_URL}/items", timeout=5)
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="inventory unavailable")
+    return _forward_response(resp)
 
 
 @app.post("/api/stock")
 def api_stock(item: StockItem):
-    resp = requests.post(f"{INVENTORY_URL}/stock", json=item.dict(), timeout=5)
-    return resp.json()
+    try:
+        resp = requests.post(f"{INVENTORY_URL}/stock", json=item.dict(), timeout=5)
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="inventory unavailable")
+    return _forward_response(resp)
 
 
 @app.post("/api/orders")
 def api_order(order: OrderRequest):
-    resp = requests.post(f"{ORDER_URL}/orders", json=order.dict(), timeout=5)
-    return resp.json()
+    try:
+        resp = requests.post(f"{ORDER_URL}/orders", json=order.dict(), timeout=5)
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="order service unavailable")
+    return _forward_response(resp)

@@ -382,8 +382,7 @@ html = """
         }
         await loadItems({ silent: true });
         if (data && typeof data === 'object') {
-          const statusText = data.status ?? 'bestätigt';
-          const summary = `Bestellung erfolgreich: #${data.order_id} — ${formData.quantity}× ${formData.item_id} für €${formData.amount.toFixed(2)} (${statusText}).`;
+          const summary = `Bestellung erfolgreich: #${data.order_id} — ${formData.quantity}× ${formData.item_id} für €${formData.amount.toFixed(2)} (${data.status}).`;
           setStatus(summary, 'success');
         } else {
           setStatus('Bestellung erfolgreich erstellt.', 'success');

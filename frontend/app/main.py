@@ -1,5 +1,5 @@
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 import requests
 
@@ -416,19 +416,39 @@ def index():
     return HTMLResponse(html)
 
 
+def _forward_response(resp: requests.Response) -> Response:
+    media_type = resp.headers.get("content-type")
+    if media_type and "application/json" in media_type.lower():
+        try:
+            data = resp.json()
+        except ValueError:
+            return Response(content=resp.content, status_code=resp.status_code, media_type=media_type)
+        return JSONResponse(content=data, status_code=resp.status_code)
+    return Response(content=resp.content, status_code=resp.status_code, media_type=media_type)
+
+
 @app.get("/api/items")
 def api_items():
-    resp = requests.get(f"{INVENTORY_URL}/items", timeout=5)
-    return resp.json()
+    try:
+        resp = requests.get(f"{INVENTORY_URL}/items", timeout=5)
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="inventory unavailable")
+    return _forward_response(resp)
 
 
 @app.post("/api/stock")
 def api_stock(item: StockItem):
-    resp = requests.post(f"{INVENTORY_URL}/stock", json=item.dict(), timeout=5)
-    return resp.json()
+    try:
+        resp = requests.post(f"{INVENTORY_URL}/stock", json=item.dict(), timeout=5)
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="inventory unavailable")
+    return _forward_response(resp)
 
 
 @app.post("/api/orders")
 def api_order(order: OrderRequest):
-    resp = requests.post(f"{ORDER_URL}/orders", json=order.dict(), timeout=5)
-    return resp.json()
+    try:
+        resp = requests.post(f"{ORDER_URL}/orders", json=order.dict(), timeout=5)
+    except requests.RequestException:
+        raise HTTPException(status_code=503, detail="order service unavailable")
+    return _forward_response(resp)
